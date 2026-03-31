@@ -1,0 +1,10 @@
+# Qt Creator junk
+*.user
+*.pro.user
+build-*/
+*.o
+*.obj
+Makefile
+debug/
+release/
+.qmake.stash
