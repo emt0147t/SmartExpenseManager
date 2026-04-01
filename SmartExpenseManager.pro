@@ -1,5 +1,5 @@
 QT += widgets
-
+QT += core gui sql charts
 CONFIG += c++17
 
 # You can make your code fail to compile if it uses deprecated APIs.
