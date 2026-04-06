@@ -18,8 +18,12 @@ MainWindow::MainWindow(QWidget *parent)
     updateDashboard();
     loadData();
 
+    ui->combo_category->addItem("Khác (Chi)");
+
     // 2. Mặc định mở trang Tổng quan
     ui->stackedWidget->setCurrentIndex(0);
+
+
 }
 
 MainWindow::~MainWindow()
@@ -195,5 +199,27 @@ void MainWindow::on_btn_filter_clicked() {
             ui->table_history->setItem(row, i, new QTableWidgetItem(query.value(i).toString()));
         }
         row++;
+    }
+}
+
+
+// Khi nhấn vào Thu nhập
+void MainWindow::on_radio_income_toggled(bool checked) {
+    if (checked) {
+        ui->combo_category->clear(); // Xóa sạch các mục cũ (như Ăn uống, Di chuyển...)
+        ui->combo_category->addItem("Lương");
+        ui->combo_category->addItem("Tiền thưởng");
+        ui->combo_category->addItem("Khác (Thu)");
+    }
+}
+
+// Khi nhấn vào Chi tiêu
+void MainWindow::on_radio_expense_toggled(bool checked) {
+    if (checked) {
+        ui->combo_category->clear();
+        ui->combo_category->addItem("Ăn uống");
+        ui->combo_category->addItem("Di chuyển");
+        ui->combo_category->addItem("Mua sắm");
+        ui->combo_category->addItem("Khác (Chi)");
     }
 }

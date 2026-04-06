@@ -25,6 +25,9 @@ private slots:
     void on_btn_save_clicked();      // Lưu dữ liệu
     void on_btn_delete_clicked();
     void on_btn_filter_clicked();
+    void on_radio_income_toggled(bool checked);
+    void on_radio_expense_toggled(bool checked);
+
 
 
 private:
