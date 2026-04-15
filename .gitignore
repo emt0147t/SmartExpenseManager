@@ -1,0 +1,33 @@
+# Qt Creator junk
+*.user
+*.pro.user
+build-*/
+*.o
+*.obj
+Makefile
+debug/
+release/
+.qmake.stash
+# Các tệp thực thi (Executable) - không đưa tệp chạy .exe lên Git
+*.exe
+*.app
+*.so
+*.dll
+
+# Tệp biên dịch giao diện (Generated UI headers)
+# Khi bạn push file .ui, máy đồng đội sẽ tự sinh ra file ui_*.h tương ứng
+ui_*.h
+
+# Các tệp tạm khác của Qt
+object_script.*
+*.moc
+moc_*.cpp
+*.qrc.cpp
+
+# Tệp hệ thống (nếu trong nhóm có bạn dùng macOS hoặc Windows)
+.DS_Store
+Thumbs.db
+
+# Nếu có dùng Python trong project (như User Summary đề cập)
+__pycache__/
+*.pyc
