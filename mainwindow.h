@@ -6,6 +6,7 @@
 #include <QNetworkReply>
 #include <QtCharts/QChartView>
 #include <QDate>
+#include <QtCharts/QCategoryAxis>
 
 // Đảm bảo sử dụng macro này để fix lỗi namespace QtCharts không tồn tại
 QT_BEGIN_NAMESPACE
@@ -40,6 +41,7 @@ private slots:
     void on_btn_analyze_ai_clicked();
 
 private:
+    double calculateNiceMaximum(double maxValue);
     Ui::MainWindow *ui;
     void updateDashboard();
     void drawBarChart();

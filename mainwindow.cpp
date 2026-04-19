@@ -26,6 +26,7 @@
 #include <QtCharts/QStackedBarSeries>
 #include <vector>
 #include <cmath>
+#include <QtCharts/QCategoryAxis>
 
 // ========================================================
 // --- CÁC HÀM BỔ TRỢ MA TRẬN CHO THUẬT TOÁN HỒI QUY AI ---
@@ -71,7 +72,21 @@ mat inverse3x3(mat A, bool& success) {
         }
     return inv;
 }
-// ========================================================
+
+double MainWindow::calculateNiceMaximum(double maxValue) {
+    if (maxValue <= 0) return 1000000;
+
+    double exponent = pow(10, floor(log10(maxValue)));
+    double fraction = maxValue / exponent;
+
+    double niceFraction;
+    if (fraction <= 1.0) niceFraction = 1.0;
+    else if (fraction <= 2.0) niceFraction = 2.0;
+    else if (fraction <= 5.0) niceFraction = 5.0;
+    else niceFraction = 10.0;
+
+    return niceFraction * exponent;
+}
 
 
 MainWindow::MainWindow(QWidget *parent)
@@ -81,47 +96,34 @@ MainWindow::MainWindow(QWidget *parent)
     ui->setupUi(this);
     // --- TỐI ƯU GIAO DIỆN BẢNG (TABLE HISTORY) ---
 
-    // 1. Ẩn cột số thứ tự bị lỗi bên trái (vì chúng ta đã có cột ID rồi)
     ui->table_history->verticalHeader()->setVisible(false);
-
-    // 2. Ép cột cuối cùng ("Ghi chú") tự động giãn ra lấp đầy toàn bộ khoảng trắng bên phải
     ui->table_history->horizontalHeader()->setStretchLastSection(true);
 
-    // 3. Set độ rộng cứng cho các cột để nhìn cân đối hơn
-    ui->table_history->setColumnWidth(0, 50);  // ID
+    ui->table_history->setColumnWidth(0, 50);  // STT
     ui->table_history->setColumnWidth(1, 120); // Ngày
     ui->table_history->setColumnWidth(2, 120); // Loại
     ui->table_history->setColumnWidth(3, 150); // Danh mục
     ui->table_history->setColumnWidth(4, 150); // Số tiền
 
-    // 4. Cải thiện UX: Bấm vào 1 ô là bôi đen cả dòng, và cấm sửa dữ liệu trực tiếp trên bảng
     ui->table_history->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->table_history->setEditTriggers(QAbstractItemView::NoEditTriggers);
-
-    // 5. (Tùy chọn) Bật hiệu ứng màu nền xen kẽ giữa các dòng cho dễ nhìn
     ui->table_history->setAlternatingRowColors(true);
 
-    // Khởi tạo Network Manager (Đảm bảo đã khai báo trong mainwindow.h)
     networkManager = new QNetworkAccessManager(this);
 
-    // 1. Cập nhật dữ liệu ban đầu
     updateDashboard();
     loadData();
     updateMonthFilter();
     drawBarChart();
 
-    // 2. Thiết lập mặc định cho ComboBox Category (Tránh rỗng)
     on_radio_expense_toggled(true);
-
-    // 3. Mặc định mở trang Tổng quan
     ui->stackedWidget->setCurrentIndex(0);
 
-    // 4. Kết nối sự kiện lọc theo tháng
     connect(ui->combo_month, &QComboBox::currentTextChanged, this, [=](const QString& text) {
         loadData(text);
     });
-    ui->date_edit->setMinimumDate(QDate(2025, 1, 1)); // Không cho phép chọn trước năm 2025
-    ui->date_edit->setDate(QDate::currentDate());    // Mặc định hiển thị ngày hôm nay
+    ui->date_edit->setMinimumDate(QDate(2025, 1, 1));
+    ui->date_edit->setDate(QDate::currentDate());
 }
 
 MainWindow::~MainWindow()
@@ -147,9 +149,20 @@ void MainWindow::on_btn_ai_clicked() {
 
 // --- PHẦN 2: LƯU GIAO DỊCH ---
 void MainWindow::on_btn_save_clicked() {
-    QString amountStr = ui->txt_amount->text();
+    QString amountStr = ui->txt_amount->text().trimmed();
+
     if (amountStr.isEmpty()) {
         QMessageBox::warning(this, "Thông báo", "Vui lòng nhập số tiền giao dịch!");
+        return;
+    }
+
+    bool isNumber;
+    long long amount = amountStr.toLongLong(&isNumber);
+
+    if (!isNumber || amount <= 0) {
+        QMessageBox::warning(this, "Lỗi định dạng", "Số tiền không hợp lệ! Vui lòng chỉ nhập số nguyên dương.");
+        ui->txt_amount->clear();
+        ui->txt_amount->setFocus();
         return;
     }
 
@@ -160,7 +173,7 @@ void MainWindow::on_btn_save_clicked() {
     query.bindValue(":date", ui->date_edit->date().toString("yyyy-MM-dd"));
     query.bindValue(":type", ui->radio_income->isChecked() ? "Thu nhập" : "Chi tiêu");
     query.bindValue(":category", ui->combo_category->currentText());
-    query.bindValue(":amount", amountStr.toDouble());
+    query.bindValue(":amount", amount);
     query.bindValue(":note", ui->txt_note->text());
 
     if(query.exec()) {
@@ -195,44 +208,7 @@ void MainWindow::updateMonthFilter() {
     ui->combo_month->blockSignals(false);
 }
 
-void MainWindow::loadData(QString filterMonth) {
-    ui->table_history->setRowCount(0);
-    // Đảm bảo số cột luôn là 6
-    if (ui->table_history->columnCount() != 6) {
-        ui->table_history->setColumnCount(6);
-        ui->table_history->setHorizontalHeaderLabels({"ID", "Ngày", "Loại", "Danh mục", "Số tiền", "Ghi chú"});
-    }
-
-    QString sql = "SELECT id, date, type, category, amount, note FROM transactions";
-    if (filterMonth != "Tất cả" && !filterMonth.isEmpty()) {
-        sql += QString(" WHERE strftime('%m/%Y', date) = '%1'").arg(filterMonth);
-    }
-    sql += " ORDER BY date DESC";
-
-    QSqlQuery query(sql);
-    int row = 0;
-    while (query.next()) {
-        ui->table_history->insertRow(row);
-        for(int i = 0; i < 6; i++) {
-            QString val = (i == 4) ? formatMoney(query.value(i).toDouble()) : query.value(i).toString();
-
-            QTableWidgetItem *item = new QTableWidgetItem(val);
-
-            // Căn lề: Số tiền căn phải. Ghi chú căn trái. Còn lại căn giữa.
-            if (i == 4) {
-                item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-            } else if (i == 5) {
-                item->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-            } else {
-                item->setTextAlignment(Qt::AlignCenter);
-            }
-
-            ui->table_history->setItem(row, i, item);
-        }
-        row++;
-    }
-}
-
+// HÀM BỊ THIẾU ĐÃ ĐƯỢC THÊM LẠI
 void MainWindow::updateDashboard() {
     QSqlQuery query;
     double tongThu = 0, tongChi = 0;
@@ -252,6 +228,46 @@ void MainWindow::updateDashboard() {
     drawBarChart();
 }
 
+void MainWindow::loadData(QString filterMonth) {
+    ui->table_history->setRowCount(0);
+    if (ui->table_history->columnCount() != 6) {
+        ui->table_history->setColumnCount(6);
+        ui->table_history->setHorizontalHeaderLabels({"STT", "Ngày", "Loại", "Danh mục", "Số tiền", "Ghi chú"});
+    }
+    ui->table_history->setColumnHidden(0, false);
+
+    QString sql = "SELECT id, date, type, category, amount, note FROM transactions";
+    if (filterMonth != "Tất cả" && !filterMonth.isEmpty()) {
+        sql += QString(" WHERE strftime('%m/%Y', date) = '%1'").arg(filterMonth);
+    }
+    sql += " ORDER BY date DESC";
+
+    QSqlQuery query(sql);
+    int row = 0;
+    while (query.next()) {
+        ui->table_history->insertRow(row);
+        for(int i = 0; i < 6; i++) {
+            QString val;
+            if (i == 0) val = QString::number(row + 1);
+            else if (i == 4) val = formatMoney(query.value(i).toDouble());
+            else val = query.value(i).toString();
+
+            QTableWidgetItem *item = new QTableWidgetItem(val);
+
+            if (i == 0) {
+                item->setData(Qt::UserRole, query.value("id"));
+            }
+
+            if (i == 4) item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            else if (i == 5) item->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+            else item->setTextAlignment(Qt::AlignCenter);
+
+            ui->table_history->setItem(row, i, item);
+        }
+        row++;
+    }
+}
+
 void MainWindow::on_btn_delete_clicked() {
     int currentRow = ui->table_history->currentRow();
     if (currentRow < 0) {
@@ -259,11 +275,13 @@ void MainWindow::on_btn_delete_clicked() {
         return;
     }
 
-    QString id = ui->table_history->item(currentRow, 0)->text();
+    QString realDbId = ui->table_history->item(currentRow, 0)->data(Qt::UserRole).toString();
+
     if (QMessageBox::question(this, "Xác nhận", "Xóa giao dịch này?") == QMessageBox::Yes) {
         QSqlQuery query;
         query.prepare("DELETE FROM transactions WHERE id = :id");
-        query.bindValue(":id", id);
+        query.bindValue(":id", realDbId);
+
         if (query.exec()) {
             if (!ui->txt_search->text().isEmpty()) {
                 on_btn_filter_clicked();
@@ -277,19 +295,26 @@ void MainWindow::on_btn_delete_clicked() {
 }
 
 void MainWindow::on_btn_filter_clicked() {
-    QString keyword = ui->txt_search->text();
+    QString keyword = ui->txt_search->text().trimmed();
     QString selectedType = ui->combo_filter_type->currentText();
 
     ui->table_history->setRowCount(0);
     if (ui->table_history->columnCount() != 6) {
         ui->table_history->setColumnCount(6);
-        ui->table_history->setHorizontalHeaderLabels({"ID", "Ngày", "Loại", "Danh mục", "Số tiền", "Ghi chú"});
+        ui->table_history->setHorizontalHeaderLabels({"STT", "Ngày", "Loại", "Danh mục", "Số tiền", "Ghi chú"});
     }
-    ui->table_history->setColumnHidden(0, true);
+    ui->table_history->setColumnHidden(0, false);
 
     QString sql = "SELECT id, date, type, category, amount, note FROM transactions WHERE 1=1";
 
-    if (!keyword.isEmpty()) sql += " AND (note LIKE '%" + keyword + "%' OR category LIKE '%" + keyword + "%')";
+    if (!keyword.isEmpty()) {
+        sql += " AND (note LIKE '%" + keyword + "%' "
+                                                "OR category LIKE '%" + keyword + "%' "
+                           "OR date LIKE '%" + keyword + "%' "
+                           "OR type LIKE '%" + keyword + "%' "
+                           "OR amount LIKE '%" + keyword + "%')";
+    }
+
     if (selectedType != "Tất cả loại") sql += " AND type = '" + selectedType + "'";
 
     sql += " ORDER BY date DESC";
@@ -298,16 +323,20 @@ void MainWindow::on_btn_filter_clicked() {
     while (query.next()) {
         ui->table_history->insertRow(row);
         for(int i = 0; i < 6; i++) {
-            QString val = (i == 4) ? formatMoney(query.value(i).toDouble()) : query.value(i).toString();
+            QString val;
+            if (i == 0) val = QString::number(row + 1);
+            else if (i == 4) val = formatMoney(query.value(i).toDouble());
+            else val = query.value(i).toString();
 
             QTableWidgetItem *item = new QTableWidgetItem(val);
-            if (i == 4) {
-                item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-            } else if (i == 5) {
-                item->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-            } else {
-                item->setTextAlignment(Qt::AlignCenter);
+
+            if (i == 0) {
+                item->setData(Qt::UserRole, query.value("id"));
             }
+
+            if (i == 4) item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            else if (i == 5) item->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+            else item->setTextAlignment(Qt::AlignCenter);
 
             ui->table_history->setItem(row, i, item);
         }
@@ -330,7 +359,6 @@ void MainWindow::on_radio_expense_toggled(bool checked) {
 }
 
 void MainWindow::drawBarChart() {
-    // TỰ ĐỘNG LẤY NĂM HIỆN TẠI
     QString targetYear = QString::number(QDate::currentDate().year());
 
     QStringList categories;
@@ -405,8 +433,12 @@ void MainWindow::drawBarChart() {
             if (maxQuery.value(0).toDouble() > maxTotalPerMonth) maxTotalPerMonth = maxQuery.value(0).toDouble();
         }
     }
-    axisY->setRange(0, maxTotalPerMonth > 0 ? (maxTotalPerMonth * 1.2) : 20000000);
-    axisY->setTickCount(11);
+
+    // Tích hợp hàm tính số làm tròn ở đây
+    double yMax = calculateNiceMaximum(maxTotalPerMonth);
+    axisY->setRange(0, yMax);
+    axisY->setTickCount(6);
+
     chart->addAxis(axisY, Qt::AlignLeft);
     series->attachAxis(axisY);
 
@@ -425,32 +457,54 @@ void MainWindow::on_btn_analyze_ai_clicked() {
                   "FROM transactions WHERE type = 'Chi tiêu' "
                   "GROUP BY month ORDER BY month ASC");
 
-    QVector<double> xData, yData;
-    int monthIndex = 1;
+    QVector<QString> allMonths;
+    QVector<double> allY;
+
     if(query.exec()) {
         while(query.next()) {
-            xData.append(monthIndex++);
-            yData.append(query.value(1).toDouble());
+            allMonths.append(query.value(0).toString());
+            allY.append(query.value(1).toDouble());
         }
     }
 
-    int n = xData.size();
+    int total = allMonths.size();
 
-    // Yêu cầu ít nhất 3 tháng để vẽ đường cong Parabola chuẩn xác
+    QVector<QString> validMonths;
+    QVector<double> validY;
+
+    if (total > 0) {
+        validMonths.prepend(allMonths[total-1]);
+        validY.prepend(allY[total-1]);
+        for(int i = total - 2; i >= 0; i--) {
+            QDate curr = QDate::fromString(allMonths[i+1] + "-01", "yyyy-MM-dd");
+            QDate prev = QDate::fromString(allMonths[i] + "-01", "yyyy-MM-dd");
+            if (prev.addMonths(1) == curr) {
+                validMonths.prepend(allMonths[i]);
+                validY.prepend(allY[i]);
+            } else {
+                break;
+            }
+        }
+    }
+
+    int n = validMonths.size();
+
     if (n < 3) {
-        ui->lbl_prediction_result->setText("Chưa đủ dữ liệu");
-        ui->lbl_ai_advice->setText("💡 Cần ít nhất 3 tháng dữ liệu để AI chạy thuật toán Ma trận.");
+        ui->lbl_prediction_result->setText("Dữ liệu đứt quãng");
+        ui->lbl_ai_advice->setText("💡 Bắt buộc: AI cần dữ liệu chi tiêu của ít nhất 3 tháng LIÊN TIẾP gần nhất để vẽ Parabola chuẩn xác. Hãy thêm dữ liệu cho các tháng bị thiếu.");
         return;
     }
 
-    // --- 1. THUẬT TOÁN MA TRẬN (HỒI QUY ĐA THỨC BẬC 2: y = ax^2 + bx + c) ---
+    QVector<double> xData;
+    for (int i = 0; i < n; i++) xData.append(i + 1);
+
     mat X(n, vec(3));
     mat Y(n, vec(1));
     for (int i = 0; i < n; i++) {
-        X[i][0] = xData[i] * xData[i]; // x^2
-        X[i][1] = xData[i];            // x
-        X[i][2] = 1.0;                 // Hệ số tự do
-        Y[i][0] = yData[i];
+        X[i][0] = xData[i] * xData[i];
+        X[i][1] = xData[i];
+        X[i][2] = 1.0;
+        Y[i][0] = validY[i];
     }
 
     mat XT = transpose(X);
@@ -460,25 +514,30 @@ void MainWindow::on_btn_analyze_ai_clicked() {
 
     if (!success) {
         ui->lbl_prediction_result->setText("Lỗi Toán Học");
-        ui->lbl_ai_advice->setText("❌ Lỗi Toán Học: Ma trận suy biến, không thể giải.");
+        ui->lbl_ai_advice->setText("❌ Lỗi: Ma trận suy biến do dữ liệu bất thường, không thể giải hệ phương trình.");
         return;
     }
 
     mat XTY = multiply(XT, Y);
-    mat beta = multiply(XTX_inv, XTY); // Tìm ra [a, b, c]
+    mat beta = multiply(XTX_inv, XTY);
 
     double a = beta[0][0];
     double b = beta[1][0];
     double c = beta[2][0];
 
-    // Dự báo cho tháng tiếp theo (x = n + 1)
     double next_month = n + 1;
     double predictedExpense = a * next_month * next_month + b * next_month + c;
-    predictedExpense = qMax(0.0, predictedExpense); // Đảm bảo không bị âm
+
+    bool isFallback = false;
+    if (predictedExpense <= 0) {
+        double totalSpend = 0;
+        for (double val : validY) totalSpend += val;
+        predictedExpense = totalSpend / n;
+        isFallback = true;
+    }
 
     ui->lbl_prediction_result->setText(formatMoney(predictedExpense) + " VNĐ");
 
-    // --- 2. VẼ BIỂU ĐỒ VỚI ĐƯỜNG CONG DỰ BÁO ---
     QLineSeries *actualSeries = new QLineSeries();
     actualSeries->setName("Thực tế");
     QPen actualPen(QColor("#20bf6b"));
@@ -494,12 +553,11 @@ void MainWindow::on_btn_analyze_ai_clicked() {
 
     double maxY = 0;
     for (int i = 0; i < n; i++) {
-        double valMillions = yData[i] / 1000000.0;
+        double valMillions = validY[i] / 1000000.0;
         actualSeries->append(xData[i], valMillions);
         if (valMillions > maxY) maxY = valMillions;
     }
 
-    // Vẽ đường cong bằng cách lấy nhiều điểm nhỏ nối với nhau (step = 0.1)
     for (double t = 1.0; t <= next_month; t += 0.1) {
         double val = a * t * t + b * t + c;
         val = qMax(0.0, val / 1000000.0);
@@ -507,66 +565,71 @@ void MainWindow::on_btn_analyze_ai_clicked() {
         if (val > maxY) maxY = val;
     }
 
-    // 3. Khởi tạo biểu đồ
     QChart *chart = new QChart();
     chart->addSeries(actualSeries);
     chart->addSeries(trendSeries);
-    chart->setTitle("PHÂN TÍCH MA TRẬN ĐA THỨC BẬC 2");
+    chart->setTitle("BIỂU ĐỒ DỰ BÁO CHI TIÊU");
     chart->setAnimationOptions(QChart::SeriesAnimations);
 
-    // Cấu hình trục Y
     QValueAxis *axisY = new QValueAxis();
     axisY->setTitleText("Số tiền (Triệu VNĐ)");
     axisY->setLabelFormat("%.1f");
 
-    double yLimit = ceil(maxY);
-    if (yLimit <= 0) yLimit = 1.0;
-    if (yLimit <= maxY) yLimit += 1.0;
-
-    axisY->setRange(0, yLimit);
-    int ticks = static_cast<int>(yLimit) + 1;
-    if (ticks > 20) ticks = 11;
-    axisY->setTickCount(ticks);
+    double topBound = maxY * 1.15;
+    if (topBound <= 0) topBound = 1.0;
+    axisY->setRange(0, topBound);
+    axisY->setTickCount(6);
 
     chart->addAxis(axisY, Qt::AlignLeft);
     actualSeries->attachAxis(axisY);
     trendSeries->attachAxis(axisY);
 
-    // Cấu hình trục X
-    QValueAxis *axisX = new QValueAxis();
-    axisX->setTitleText("Tháng thứ");
-    axisX->setRange(1, n + 1);
-    axisX->setLabelFormat("%d");
-    axisX->setTickCount(n + 1);
+    QCategoryAxis *axisX = new QCategoryAxis();
+    axisX->setTitleText("Thời gian");
+    for (int i = 0; i < n; i++) {
+        QDate d = QDate::fromString(validMonths[i] + "-01", "yyyy-MM-dd");
+        axisX->append(d.toString("MM/yyyy"), xData[i]);
+    }
+
+    QDate lastDate = QDate::fromString(validMonths.last() + "-01", "yyyy-MM-dd");
+    axisX->append(lastDate.addMonths(1).toString("MM/yyyy") + "\n(Dự báo)", next_month);
+
+    axisX->setRange(1, next_month);
+    axisX->setLabelsPosition(QCategoryAxis::AxisLabelsPositionOnValue);
 
     chart->addAxis(axisX, Qt::AlignBottom);
     actualSeries->attachAxis(axisX);
     trendSeries->attachAxis(axisX);
 
-    // Hiển thị lên UI
     QChart *oldChart = ui->widget_2->chart();
     ui->widget_2->setChart(chart);
     if (oldChart) delete oldChart;
     ui->widget_2->setRenderHint(QPainter::Antialiasing);
 
-    // 4. Gọi AI tư vấn
     QSqlQuery qThu("SELECT SUM(amount) FROM transactions WHERE type = 'Thu nhập'");
     double thuVal = 0;
     if (qThu.next()) thuVal = qThu.value(0).toDouble();
 
-    QString prompt = QString("Tôi là sinh viên. Thu nhập hiện tại: %1 VNĐ. "
-                             "Thuật toán ma trận AI dự báo chi tiêu tháng tới: %2 VNĐ. "
-                             "Hãy đưa ra 1 lời khuyên tài chính cực ngắn (dưới 40 chữ).")
-                         .arg(formatMoney(thuVal)).arg(formatMoney(predictedExpense));
+    QString prompt;
+    if (isFallback) {
+        prompt = QString("Tôi là sinh viên. Thu nhập tháng này: %1 VNĐ. "
+                         "Dữ liệu chi tiêu biến động mạnh, thuật toán dự báo mức trung bình tháng tới là: %2 VNĐ. "
+                         "Hãy cho tôi lời khuyên để ổn định lại chi tiêu, dưới 40 chữ.")
+                     .arg(formatMoney(thuVal)).arg(formatMoney(predictedExpense));
+    } else {
+        prompt = QString("Tôi là sinh viên. Thu nhập tháng này: %1 VNĐ. "
+                         "AI dự báo chi tiêu tháng tới sẽ là: %2 VNĐ. "
+                         "Hãy đưa ra 1 lời khuyên tài chính ngắn gọn dưới 40 chữ.")
+                     .arg(formatMoney(thuVal)).arg(formatMoney(predictedExpense));
+    }
+
     askGemini(prompt);
 }
 
 void MainWindow::askGemini(QString promptText) {
-    // 1. KHÓA NÚT BẤM VÀ CẬP NHẬT TRẠNG THÁI
     ui->btn_analyze_ai->setEnabled(false);
     ui->lbl_ai_advice->setText("⏳ AI đang phân tích dữ liệu, vui lòng đợi vài giây...");
 
-    // Cấu hình mạng gửi đến Ollama
     QString endpoint = "http://localhost:11434/api/generate";
     QNetworkRequest request((QUrl(endpoint)));
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
@@ -576,7 +639,6 @@ void MainWindow::askGemini(QString promptText) {
     root["prompt"] = promptText;
     root["stream"] = false;
 
-    // Gửi request
     QNetworkReply *reply = networkManager->post(request, QJsonDocument(root).toJson());
 
     connect(reply, &QNetworkReply::finished, this, [=]() {
@@ -587,9 +649,7 @@ void MainWindow::askGemini(QString promptText) {
             ui->lbl_ai_advice->setText("❌ Lỗi: Hãy kiểm tra xem app Ollama đã được bật chưa.");
         }
 
-        // 2. MỞ KHÓA NÚT BẤM KHI ĐÃ XỬ LÝ XONG
         ui->btn_analyze_ai->setEnabled(true);
-
         reply->deleteLater();
     });
 }

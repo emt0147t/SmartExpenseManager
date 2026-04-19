@@ -115,10 +115,10 @@
        <item>
         <widget class="QLabel" name="lbl_logo">
          <property name="styleSheet">
-          <string>color: white; font-weight: bold; font-size: 18px; margin-bottom: 20px;</string>
+          <string notr="true">color: white; font-weight: bold; font-size: 16px; margin-bottom: 20px;</string>
          </property>
          <property name="text">
-          <string>SMART EXPENSE</string>
+          <string>SMART EXPENSE MANAGER</string>
          </property>
          <property name="alignment">
           <set>Qt::AlignmentFlag::AlignCenter</set>
